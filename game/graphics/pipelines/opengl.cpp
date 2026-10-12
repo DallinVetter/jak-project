@@ -232,12 +232,20 @@ static std::shared_ptr<GfxDisplay> gl_make_display(int width,
       return NULL;
     }
   }
+  lg::startup("GL context created and made current");
 
   if (!gl_inited) {
     {
       auto p = scoped_prof("startup::sdl::glad_init");
+#ifdef __PROSPERO__
+      // GL is linked into the title: there is no libGL for gladLoadGL() to open, and this call
+      // resolves every entry point through SDL.
+      const bool gl_loaded = gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress);
+#else
       gladLoadGLLoader((GLADloadproc)SDL_GL_GetProcAddress);
-      if (!gladLoadGL()) {
+      const bool gl_loaded = gladLoadGL();
+#endif
+      if (!gl_loaded) {
         lg::error("GL init fail");
         dialogs::create_error_message_dialog("Critical Error Encountered",
                                              "Unable to initialize OpenGL API.\nOpenGOAL requires "
