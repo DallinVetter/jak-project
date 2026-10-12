@@ -11,6 +11,7 @@
 
 #include "common/global_profiler/GlobalProfiler.h"
 #include "common/log/log.h"
+#include "common/log/startup.h"
 #include "common/util/FileUtil.h"
 #include "common/util/dialogs.h"
 #include "common/util/os.h"
@@ -51,6 +52,21 @@ void setup_logging(const std::string& game_name, bool verbose, bool disable_ansi
   lg::initialize();
 }
 
+#ifdef __PROSPERO__
+/*!
+ * Logging for a PS5 title: there is no terminal, so everything goes to one file that the hardware
+ * cycle can read over FTP, and every line is flushed so a start that fails says how far it got.
+ */
+void setup_ps5_logging() {
+  lg::set_file("gk", false, false, std::string(file_util::PS5_WRITABLE_DIR) + "/log");
+  lg::set_file_level(lg::level::debug);
+  lg::set_stdout_level(lg::level::info);
+  lg::set_flush_level(lg::level::trace);
+  lg::disable_ansi_colors();
+  lg::initialize();
+}
+#endif
+
 std::string game_arg_documentation() {
   // clang-format off
   std::string output = fmt::format(fmt::emphasis::bold, "Game Args (passed through to the game runtime after '--')\n");
@@ -88,6 +104,11 @@ std::string game_arg_documentation() {
  */
 int main(int argc, char** argv) {
   ArgumentGuard u8_guard(argc, argv);
+
+#ifdef __PROSPERO__
+  setup_ps5_logging();
+#endif
+  lg::startup("process entry");
 
   // CLI flags
   bool show_version = false;
@@ -214,6 +235,15 @@ int main(int argc, char** argv) {
   } else if (!file_util::setup_project_path(project_path_override)) {
     return 1;
   }
+  lg::startup("project path: {}", file_util::get_jak_project_dir().string());
+  lg::startup("user config directory: {}", file_util::get_user_config_dir().string());
+  {
+    // the kernel is the first thing the game loads
+    const auto iso_dir = file_util::get_jak_project_dir() / "out" / game_name / "iso";
+    std::error_code ec;
+    lg::startup("game data: {} is {}", (iso_dir / "KERNEL.CGO").string(),
+                fs::exists(iso_dir / "KERNEL.CGO", ec) ? "present" : "missing");
+  }
 
   if (disable_avx2) {
     // for debugging the non-avx2 code paths, there's a flag to manually disable.
@@ -234,12 +264,14 @@ int main(int argc, char** argv) {
     lg::info("AVX2 mode disabled");
   }
 
+#ifndef __PROSPERO__
   try {
     setup_logging(game_name, verbose_logging, _cli_flag_disable_ansi);
   } catch (const std::exception& e) {
     lg::error("Failed to setup logging: {}", e.what());
     return 1;
   }
+#endif
 
   bool force_debug_next_time = false;
   bool force_retail_next_time = false;
@@ -274,6 +306,7 @@ int main(int argc, char** argv) {
 
     // run the runtime in a loop so we can reset the game and have it restart cleanly
     lg::info("OpenGOAL Runtime {}.{}", versions::GOAL_VERSION_MAJOR, versions::GOAL_VERSION_MINOR);
+    lg::startup("entering runtime");
     try {
       MasterExit = RuntimeExitStatus::RUNNING;
       auto exit_status = exec_runtime(game_options, arg_ptrs.size(), arg_ptrs.data());

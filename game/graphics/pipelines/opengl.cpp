@@ -14,6 +14,7 @@
 #include "common/global_profiler/GlobalProfiler.h"
 #include "common/goal_constants.h"
 #include "common/log/log.h"
+#include "common/log/startup.h"
 #include "common/util/FileUtil.h"
 #include "common/util/FrameLimiter.h"
 #include "common/util/Timer.h"
@@ -120,6 +121,8 @@ static int gl_init(GfxGlobalSettings& settings) {
     auto linked_sdl_version = SDL_GetVersion();
     lg::info("SDL Initialized, compiled with version - {} | linked with version - {}",
              compiled_sdl_version, linked_sdl_version);
+    const char* video_driver = SDL_GetCurrentVideoDriver();
+    lg::startup("SDL initialized, video driver: {}", video_driver ? video_driver : "none");
   }
 
   {
@@ -207,6 +210,7 @@ static std::shared_ptr<GfxDisplay> gl_make_display(int width,
         "supports this and your drivers are up to date.");
     return NULL;
   }
+  lg::startup("window created");
 
   // Make an OpenGL Context
   prof().begin_event("startup::sdl::create_context");
@@ -254,6 +258,7 @@ static std::shared_ptr<GfxDisplay> gl_make_display(int width,
         return NULL;
       }
     }
+    lg::startup("GL loader complete: OpenGL {}.{}", GLVersion.major, GLVersion.minor);
     {
       auto p = scoped_prof("startup::sdl::gfx_data_init");
       g_gfx_data = std::make_unique<GraphicsData>(game_version);
@@ -262,6 +267,7 @@ static std::shared_ptr<GfxDisplay> gl_make_display(int width,
     const char* gl_version = (const char*)glGetString(GL_VERSION);
     lg::info("OpenGL initialized - v{}.{} | Renderer: {}", GLVersion.major, GLVersion.minor,
              gl_version);
+    lg::startup("renderer initialized");
   }
 
   {
@@ -314,6 +320,7 @@ static std::shared_ptr<GfxDisplay> gl_make_display(int width,
     init_imgui(window, gl_context, "#version 430");
 #endif
   }
+  lg::startup("display created");
 
   return std::static_pointer_cast<GfxDisplay>(display);
 }

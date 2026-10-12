@@ -31,6 +31,7 @@
 #include "common/global_profiler/GlobalProfiler.h"
 #include "common/goal_constants.h"
 #include "common/log/log.h"
+#include "common/log/startup.h"
 #include "common/versions/versions.h"
 
 #include "game/external/discord.h"
@@ -89,6 +90,13 @@
 #include "sce/libcdvd_ee.h"
 #include "sce/sif_ee.h"
 #include "system/SystemThread.h"
+
+#ifdef __PROSPERO__
+extern "C" int sceKernelQueryMemoryProtection(void* address,
+                                              void** start,
+                                              void** end,
+                                              int* protection);
+#endif
 
 u8* g_ee_main_mem = nullptr;
 u8* g_ee_main_mem_exec = nullptr;
@@ -158,7 +166,7 @@ void ee_runner(SystemThreadInterface& iface) {
   if (EE_MEM_LOW_MAP) {
     g_ee_main_mem =
         (u8*)mmap((void*)0x10000000, EE_MAIN_MEM_SIZE, PROT_EXEC | PROT_READ | PROT_WRITE,
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(__PROSPERO__)
                   // has no map_populate
                   MAP_ANONYMOUS | MAP_32BIT | MAP_PRIVATE, 0, 0);
 #else
@@ -169,6 +177,11 @@ void ee_runner(SystemThreadInterface& iface) {
     // mach_vm_remap needs an anonymous writable mapping
     g_ee_main_mem = (u8*)mmap((void*)EE_MAIN_MEM_MAP, EE_MAIN_MEM_SIZE, PROT_READ | PROT_WRITE,
                               MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+#elif defined(__PROSPERO__)
+    // FreeBSD requires fd -1 for an anonymous mapping
+    g_ee_main_mem =
+        (u8*)mmap((void*)EE_MAIN_MEM_MAP, EE_MAIN_MEM_SIZE, PROT_EXEC | PROT_READ | PROT_WRITE,
+                  MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
 #else
     g_ee_main_mem =
         (u8*)mmap((void*)EE_MAIN_MEM_MAP, EE_MAIN_MEM_SIZE, PROT_EXEC | PROT_READ | PROT_WRITE,
@@ -183,6 +196,25 @@ void ee_runner(SystemThreadInterface& iface) {
   }
 
   g_ee_main_mem_exec = g_ee_main_mem;
+
+#ifdef __PROSPERO__
+  // The PS5 kernel gives a sandboxed title read/write when it asks for read/write/execute, and
+  // mmap still succeeds. GOAL code runs from this memory, so check what was really granted
+  // instead of faulting on the first call into it.
+  {
+    void* start = nullptr;
+    void* end = nullptr;
+    int protection = 0;
+    int query = sceKernelQueryMemoryProtection(g_ee_main_mem, &start, &end, &protection);
+    lg::startup("EE main memory: mapped at 0x{:x}, granted protection 0x{:x} (query 0x{:x})",
+                (u64)g_ee_main_mem, protection, (u32)query);
+    if (query != 0 || (protection & PROT_EXEC) == 0) {
+      lg::error("EE main memory is not executable: GOAL code cannot run. The EE will not start.");
+      iface.initialization_complete();
+      return;
+    }
+  }
+#endif
 
 #if defined(__APPLE__) && defined(__aarch64__)
   // map the same pages again with read and execute access
@@ -260,6 +292,8 @@ void ee_runner(SystemThreadInterface& iface) {
 
   // Added for OpenGOAL's debugger
   xdbg::allow_debugging();
+
+  lg::startup("EE: starting the GOAL kernel");
 
   switch (g_game_version) {
     case GameVersion::Jak1:
@@ -439,7 +473,9 @@ RuntimeExitStatus exec_runtime(GameLaunchOptions game_options, int argc, const c
   {
     auto p = scoped_prof("startup::exec_runtime::init_gfx");
     if (enable_display) {
+      lg::startup("graphics: initializing");
       Gfx::Init(g_game_version);
+      lg::startup("graphics: initialized");
     }
   }
 
@@ -483,7 +519,9 @@ RuntimeExitStatus exec_runtime(GameLaunchOptions game_options, int argc, const c
 
   // step 4: wait for EE to signal a shutdown. meanwhile, run video loop on main thread.
   // TODO relegate this to its own function
+  lg::startup("system threads started (IOP, DECI2, EE worker, EE)");
   if (enable_display) {
+    lg::startup("entering the graphics loop");
     try {
       Gfx::Loop([]() { return MasterExit == RuntimeExitStatus::RUNNING; });
     } catch (std::exception& e) {
