@@ -160,6 +160,42 @@ Consequences:
 - `fs::current_path`, and anything that reaches it (`fs::absolute` on a relative path),
   must not be called on PS5.
 
+## First gk runs on hardware
+
+Three runs on 2026-10-12, one variable apart. Evidence under
+`../ps5-homebrew-dev-protocol/results/`.
+
+| Candidate | Result |
+|---|---|
+| `94de4eafc`, eboot `0351fb15` (`PPSA99005-20261012T214014Z`) | died in under a second, before `gk.log` existed: `ghc::filesystem::filesystem_error: Operation not permitted: '/data/opengoal/log'` in the stdout receipt |
+| `612866d28`, eboot `f50609fe` (`PPSA99005-20261012T214750Z`), `lstat` wrapped | reached GL: every `[startup]` stage through "GL loader complete", then stopped on missing game data |
+
+What they establish:
+
+- OpenGOAL's `fs::` is ghc::filesystem (`third-party/filesystem.hpp`), not `std::filesystem`.
+  It calls `lstat` for every status query, and the sandbox refuses `lstat` under `/data` with
+  EPERM while `stat`, `mkdir`, `open` and `write` work. `ps5/title/sandbox_fs.c` answers a
+  refused `lstat` with `stat`.
+- The log under `/data/opengoal/log/gk.log` works and is flushed per line.
+- The project directory resolves to `/app0/data` through the ordinary executable-relative lookup.
+- SDL initialises with the `ps5` video driver; OpenGOAL's window request (resizable, high pixel
+  density, depth 24, stencil 8, alpha 8) and its 4.3 Core context request are accepted.
+- The GL loader guard works: glad reports OpenGL 4.6, "4.6 (Core Profile) Mesa 26.2.0",
+  renderer "PS5 AGC", GLSL 4.60.
+- C++ exceptions are thrown, caught and reported correctly on hardware (the missing-file
+  exception was caught in `main` and logged), which the probe had not reached.
+- Startup stops in renderer initialisation, where the level loader reads
+  `out/jak1/fr3/GAME.fr3`. That file is built from the user's own disc; a desktop build stops
+  at the same place without it.
+
+Two link pitfalls found on the way, both now checked by `stage_title.py`:
+
+- A `--wrap` wrapper or an override of a weak default must be linked as an object. From an
+  archive the linker never pulls it.
+- `libScePosixForWebKit` exports `__wrap_lstat` (and `__wrap_access`, `__wrap_getcwd`,
+  `__wrap_mmap`, `__wrap_readlink`, `__wrap_statvfs`, ...) itself, so an unpulled wrapper links
+  silently against the system's.
+
 ## Minimum change set for a first launch
 
 1. A PS5 CMake configuration that builds only `gk`'s dependency closure with the PS5
