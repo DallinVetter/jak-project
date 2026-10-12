@@ -41,6 +41,9 @@ PS5-only sources linked into the title, so `common/` and `game/` need no branche
   reaches the audio hardware.
 - `unused_services.cpp`: Discord, libcurl and message-box entry points that report "unavailable".
 - `replxx_unused.cpp`: line-editor members that only goalc's REPL would call.
+- `sandbox_fs.c`: `lstat` answered by `stat` when the sandbox refuses it (linked with
+  `--wrap=lstat`). OpenGOAL's `fs::` is ghc::filesystem, which calls `lstat` for every status query.
+- `title_heap.c`: the title's heap size.
 
 ## Logs
 
