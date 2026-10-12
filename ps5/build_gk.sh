@@ -48,6 +48,10 @@ while IFS= read -r object; do links+=(--link "$object"); done < <(
     find "$build/CMakeFiles/gk_main.dir" -name '*.o' -o -name '*.obj' | sort)
 while IFS= read -r archive; do links+=(--link "$archive"); done < <(
     find "$build" -name '*.a' -not -path '*/CMakeFiles/*' | sort)
+# Link-time wrappers and overrides of the shims' weak defaults only take effect as objects:
+# the linker does not pull an archive member to replace a definition it already has.
+sources=()
+for source in "$here"/title/*.c; do sources+=(--source "$source"); done
 libc_args=()
 [[ -f $template/runtime/libc.prx ]] || libc_args=(--libc-prx "$libc_prx")
 python3 "$here/stage_title.py" --out "$root/build/ps5/$stage" --ps5-opengl "$opengl" \
@@ -55,4 +59,4 @@ python3 "$here/stage_title.py" --out "$root/build/ps5/$stage" --ps5-opengl "$ope
     --title-name "OpenGOAL Jak 1 (PS5 bring-up)" --cxx-runtime --wrap lstat \
     --add-dir "$root/game/graphics/opengl_renderer/shaders=data/game/graphics/opengl_renderer/shaders" \
     --add-dir "$root/game/assets=data/game/assets" \
-    "${links[@]}" --link "$sdl/cmake/sdl/libSDL3.a"
+    "${sources[@]}" "${links[@]}" --link "$sdl/cmake/sdl/libSDL3.a"

@@ -41,9 +41,21 @@ PS5-only sources linked into the title, so `common/` and `game/` need no branche
   reaches the audio hardware.
 - `unused_services.cpp`: Discord, libcurl and message-box entry points that report "unavailable".
 - `replxx_unused.cpp`: line-editor members that only goalc's REPL would call.
+
+## title
+
+Sources linked into the title as objects rather than through an archive. A link-time wrapper
+or an override of one of the shims' weak defaults only takes effect that way: the linker does
+not pull an archive member to replace a definition it already has, and a system library exports
+`__wrap_` names of its own. `stage_title.py` checks after the link that every wrapper is the
+title's and records the heap size in `candidate.json`.
+
 - `sandbox_fs.c`: `lstat` answered by `stat` when the sandbox refuses it (linked with
   `--wrap=lstat`). OpenGOAL's `fs::` is ghc::filesystem, which calls `lstat` for every status query.
-- `title_heap.c`: the title's heap size.
+
+The heap is ps5-opengl's default: 128 MiB of flexible memory, with the libc heap behind it.
+A title raises it by defining `ps5_opengl_heap_size` in a source here (above 128 MiB the
+allocator uses direct memory; ps5-opengl's CTS runner uses 1 GiB).
 
 ## Logs
 

@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,6 +33,42 @@ def run(*args, **kwargs):
 
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def symbols(elf, *flags):
+    """{name: (kind, address)} from llvm-nm."""
+    out = run("llvm-nm-18", *flags, elf, capture_output=True, text=True).stdout
+    result = {}
+    for line in out.splitlines():
+        parts = line.split()
+        result[parts[-1]] = (parts[-2], int(parts[0], 16) if len(parts) == 3 else None)
+    return result
+
+
+def read_u64(elf, address):
+    data = Path(elf).read_bytes()
+    offset, = struct.unpack_from("<Q", data, 32)
+    size, count = struct.unpack_from("<HH", data, 54)
+    for index in range(count):
+        kind, _, file_offset, start, _, file_size, _, _ = struct.unpack_from(
+            "<IIQQQQQQ", data, offset + index * size)
+        if kind == 1 and start <= address < start + file_size:
+            return struct.unpack_from("<Q", data, file_offset + address - start)[0]
+    raise SystemExit(f"address 0x{address:x} is not in a loaded segment of {elf}")
+
+
+def verify_link(elf, wraps):
+    """What the link really did: a wrapper or override that lives in an archive is silently
+    not used, and a system library exports some __wrap_ names of its own."""
+    table = symbols(elf)
+    for name in wraps:
+        if table.get(f"__wrap_{name}", ("U",))[0] not in "Tt":
+            raise SystemExit(f"--wrap={name}: the title does not define __wrap_{name}")
+    stray = [name for name, (kind, _) in table.items()
+             if kind == "U" and name.startswith(("__wrap_", "__real_"))]
+    if stray:
+        raise SystemExit(f"unresolved wrapper symbols: {stray}")
+    return read_u64(elf, table["ps5_opengl_heap_size"][1])
 
 
 def replace_once(path, old, new):
@@ -155,6 +192,8 @@ def main():
     env["APP_ASSETS"] = ""
     run("bash", script, "Folder", env=env, cwd=out)
 
+    heap_size = verify_link(out / "build/llvm-pie.elf", wraps)
+    print(f"title heap: {heap_size >> 20} MiB")
     candidate = out / "dist" / param["titleId"]
     # After the template's build: it recreates the title folder. Its ZIP lacks these.
     for source, dest in added:
@@ -166,6 +205,8 @@ def main():
               "template_commit": template_commit,
               "gl_sdk_manifest_sha256": digest(prefix / "manifest.sha256"),
               "template_libc_sha256": digest(out / "runtime/libc.prx"),
+              "heap_size": heap_size,
+              "wrapped": wraps,
               "inputs": inputs,
               "files": {str(p.relative_to(candidate)): digest(p)
                         for p in sorted(candidate.rglob("*")) if p.is_file()}}
