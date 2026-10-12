@@ -191,6 +191,14 @@ std::optional<std::string> try_get_jak_project_path() {
 }
 
 std::optional<fs::path> try_get_data_dir(bool skip_logs) {
+#ifdef __PROSPERO__
+  // Game data built from the user's own disc is deployed once beside the logs and saves, not
+  // into the title folder, which is re-verified file by file on every install.
+  const auto persistent_data_dir = fs::path(PS5_WRITABLE_DIR) / "data";
+  if (fs::exists(persistent_data_dir) && fs::is_directory(persistent_data_dir)) {
+    return std::make_optional(persistent_data_dir);
+  }
+#endif
   fs::path my_path = get_current_executable_path();
   if (!skip_logs) {
     lg::debug("Current executable directory - {}", my_path.string());

@@ -3,7 +3,7 @@
 Host-side tooling for the native PS5 port. Read [../PORTING.md](../PORTING.md) first;
 [AUDIT.md](AUDIT.md) records what the port has to change and why.
 
-Nothing here talks to a console. Hardware runs go through
+Apart from `deploy_data.py`, nothing here talks to a console. Hardware runs go through
 `../ps5-homebrew-dev-protocol` (`scripts/freeze-candidate.sh`, then `scripts/ps5-cycle.sh`).
 
 ## Requirements
@@ -31,6 +31,16 @@ on the vendored ones. NASM is required for `game/kernel/asm_funcs_x86_64.asm`.
 CMake only compiles and archives. `stage_title.py` links the archives and `game/main.cpp`'s
 object, and adds the shaders and `game/assets` to the title folder as `/app0/data`, where the
 runtime looks for its project directory. Game data from the user's own disc is not added.
+
+## deploy_data.py
+
+On PS5, gk uses `/data/opengoal/data` as its project directory when it exists, and the title's
+own `/app0/data` (shaders and assets only) otherwise. `deploy_data.py` sends the shaders,
+`game/assets` and `out/<game>/{iso,fr3}` there, each file read back before it is moved into
+place, skipping files whose size already matches. The `out/` files are built on the host from
+your own disc (`extractor <iso> --extract --decompile --compile`), stay out of Git, and go
+only to your console. Because that directory is outside the title folder, a hardware cycle does
+not re-verify the game data on every run; rerun the script after changing shaders.
 
 ## platform
 

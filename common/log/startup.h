@@ -11,14 +11,12 @@ namespace lg {
  *
  * A PS5 title has no terminal and may fail before it shows anything, so there these are
  * info-level lines in a log that is flushed on every write: a start that fails names the last
- * stage it completed. Elsewhere they are debug-level.
+ * stage it completed. Elsewhere this does nothing, so desktop output is unchanged.
  */
 template <typename... Args>
-void startup(const std::string& format, Args&&... args) {
+void startup([[maybe_unused]] const std::string& format, [[maybe_unused]] Args&&... args) {
 #ifdef __PROSPERO__
   log(level::info, "[startup] " + format, std::forward<Args>(args)...);
-#else
-  log(level::debug, "[startup] " + format, std::forward<Args>(args)...);
 #endif
 }
 }  // namespace lg
