@@ -6,6 +6,9 @@
 
 #ifdef OS_POSIX
 #include <pthread.h>
+#ifdef __PROSPERO__
+#include <pthread_np.h>
+#endif
 #else
 // Include order matters...
 // clang-format off
@@ -101,6 +104,8 @@ void* bootstrap_thread_func(void* x) {
   pthread_setname_np(pthread_self(), thd->name.c_str());
 #elif __APPLE__
   pthread_setname_np(thd->name.c_str());
+#elif __PROSPERO__
+  pthread_set_name_np(pthread_self(), thd->name.c_str());
 #else
   SetThreadDescription(GetCurrentThread(), (LPCWSTR)utf8_string_to_wide_string(thd->name).c_str());
 #endif

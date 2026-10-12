@@ -27,6 +27,13 @@
 namespace fs = ghc::filesystem;
 
 namespace file_util {
+#ifdef __PROSPERO__
+/*!
+ * Where a PS5 title keeps what it writes (logs, settings, saves). Its own folder, /app0, is
+ * read-only; /data is writable from a title and reachable over FTP.
+ */
+inline constexpr const char* PS5_WRITABLE_DIR = "/data/opengoal";
+#endif
 fs::path get_user_home_dir();
 fs::path get_user_config_dir();
 fs::path get_user_settings_dir(GameVersion game_version);

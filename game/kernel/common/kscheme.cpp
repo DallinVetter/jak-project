@@ -116,7 +116,7 @@ uint64_t _call_goal_on_stack_asm_arm64(u64 rsp,
                                        void* offset,
                                        void* exec_offset);
 #endif
-#elif defined __linux__
+#elif defined __linux__ || defined __PROSPERO__
 uint64_t _call_goal_asm_systemv(u64 a0, u64 a1, u64 a2, void* fptr, void* st_ptr, void* offset);
 uint64_t _call_goal_on_stack_asm_systemv(u64 rsp,
                                          u64 u0,
@@ -152,7 +152,7 @@ u64 call_goal(Ptr<Function> f, u64 a, u64 b, u64 c, u64 st, void* offset) {
   // use the executable mapping for the function and GOAL base
   return _call_goal_asm_arm64(a, b, c, (void*)(g_ee_main_mem_exec + f.offset), st_ptr, offset,
                               g_ee_main_mem_exec);
-#elif defined __linux__
+#elif defined __linux__ || defined __PROSPERO__
   return _call_goal_asm_systemv(a, b, c, fptr, st_ptr, offset);
 #elif defined __APPLE__ && defined __x86_64__
   return _call_goal_asm_systemv(a, b, c, fptr, st_ptr, offset);
@@ -174,7 +174,7 @@ u64 call_goal_on_stack(Ptr<Function> f, u64 rsp, u64 st, void* offset) {
 #ifdef __aarch64__
   return _call_goal_on_stack_asm_arm64(rsp, 0, 0, (void*)(g_ee_main_mem_exec + f.offset), st_ptr,
                                        offset, g_ee_main_mem_exec);
-#elif defined __linux__
+#elif defined __linux__ || defined __PROSPERO__
   return _call_goal_on_stack_asm_systemv(rsp, 0, 0, fptr, st_ptr, offset);
 #elif defined __APPLE__ && defined __x86_64__
   return _call_goal_on_stack_asm_systemv(rsp, 0, 0, fptr, st_ptr, offset);

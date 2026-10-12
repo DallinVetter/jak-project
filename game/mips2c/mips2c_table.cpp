@@ -19,7 +19,7 @@ void _mips2c_call_arm64() asm("_mips2c_call_arm64");
 #else
 void _mips2c_call_arm64();
 #endif
-#elif defined __linux__
+#elif defined __linux__ || defined __PROSPERO__
 void _mips2c_call_systemv();
 #elif defined __APPLE__ && defined __x86_64__
 void _mips2c_call_systemv() asm("_mips2c_call_systemv");
@@ -981,7 +981,7 @@ void LinkedFunctionTable::reg(const std::string& name, u64 (*exec)(void*), u32 s
     ptr++;
 
     // call the other function
-#ifdef __linux__
+#if defined __linux__ || defined __PROSPERO__
     addr = (u64)_mips2c_call_systemv;
 #elif defined __APPLE__ && defined __x86_64__
     addr = (u64)_mips2c_call_systemv;

@@ -7,6 +7,7 @@
 #include "common/common_types.h"
 #ifdef OS_POSIX
 #include <arpa/inet.h>
+#include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <unistd.h>

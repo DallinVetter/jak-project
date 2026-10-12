@@ -184,7 +184,8 @@ void setup_cpu_info() {
 
 #if defined(_WIN32)
   setup_cpu_info_windows(gCpuInfo);
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__PROSPERO__)
+  // on x86-64 this path uses cpuid only, which is all a PS5 title has
   setup_cpu_info_macos(gCpuInfo);
 #elif defined(__linux__)
   setup_cpu_info_linux(gCpuInfo);

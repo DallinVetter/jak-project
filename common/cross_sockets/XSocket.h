@@ -25,7 +25,7 @@
 const int TCP_SOCKET_LEVEL = SOL_TCP;
 #elif _WIN32
 const int TCP_SOCKET_LEVEL = IPPROTO_TCP;
-#elif __APPLE__
+#elif defined(__APPLE__) || defined(__PROSPERO__)
 const int TCP_SOCKET_LEVEL = IPPROTO_TCP;
 #endif
 
