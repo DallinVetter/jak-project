@@ -87,8 +87,8 @@ void probe_filesystem(Say say) {
     say("[probe] cxx fs list=%s open-errno=%d entries=%d last-errno=%d", path, open_error, count,
         error.value());
   }
-  auto cwd = fs::current_path(error);
-  say("[probe] cxx fs current_path=%s errno=%d", cwd.string().c_str(), error.value());
+  // fs::current_path is deliberately not probed again: the title died inside it on hardware
+  // (2026-10-12, results/PPSA99005-20261012T205700Z).
 
   if (std::FILE* file = std::fopen("/app0/sce_sys/param.json", "rb")) {
     char buffer[16] = {};
