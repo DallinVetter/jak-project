@@ -123,6 +123,43 @@ Other startup dependencies: the DECI2 listener and `XSocket` (BSD sockets, guard
 `OS_POSIX`, which this platform does not get), `xdbg` (Linux ptrace; needs a no-op
 branch), `common/util/os.cpp` (cpuid, memory size), `SystemThread` and `Timer`.
 
+## Hardware probe results
+
+Probe at `e32eda0a8`, eboot `c3cbc09ed989ce5c`, run once on 2026-10-12 as an installed
+title under ShadowMount Plus (uid 1, 16 KiB pages). Evidence:
+`../ps5-homebrew-dev-protocol/results/PPSA99005-20261012T205700Z`.
+
+| Question | Result |
+|---|---|
+| `mmap` anonymous `RWX` | succeeds, but the kernel reports `RW`: execute is dropped silently |
+| `mprotect` / `sceKernelMprotect` `RW` to `RWX` | return 0, mapping stays `RW` |
+| `mprotect` `RW` to `RX` | returns 0, mapping becomes read-only |
+| `sceKernelMapNamedFlexibleMemory` `RWX` | succeeds, reported `RW` |
+| `sceKernelJitCreateSharedMemory` | `0x80020001` (EPERM) |
+| Log file under `/data` | `mkdir /data/opengoal` and `fopen` for writing both work |
+| `std::thread`, mutex, condition variable, `thread_local`, `sleep_for` | work; 16 hardware threads |
+| `fs::exists` / `is_directory` on `/app0`, `/data`, `/download0` | work |
+| `fs::directory_iterator` on `/app0` and `/data/opengoal` | EPERM on both |
+| `fs::current_path` | the title died in this call (`pathconf` is not in the libc or libkernel export lists) |
+| Flexible memory available at start | 416 MiB; direct memory 11.4 GiB total |
+
+Not reached because of the `current_path` crash: the 128 MiB EE mapping and commit, RTTI,
+and exceptions. The crash left no new console error record, and the SDL3 example behind
+the probe did not run.
+
+Consequences:
+
+- **No interface open to a sandboxed title yields executable memory.** A request for it
+  never fails, so OpenGOAL must check the reported protection after mapping EE memory
+  rather than trust `mmap`'s return value; otherwise the first call into GOAL code faults.
+  Running GOAL code needs a decision outside this repository's code: see
+  [../AGENT_HANDOFF.md](../AGENT_HANDOFF.md).
+- Directory listing is refused even in the title's own folder. `fake_iso`'s scan of
+  `out/jak1/iso`, log rotation and every other `directory_iterator` use needs either an
+  elevated process or a file manifest generated on the host.
+- `fs::current_path`, and anything that reaches it (`fs::absolute` on a relative path),
+  must not be called on PS5.
+
 ## Minimum change set for a first launch
 
 1. A PS5 CMake configuration that builds only `gk`'s dependency closure with the PS5
