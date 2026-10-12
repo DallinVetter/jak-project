@@ -61,13 +61,17 @@ which otherwise needs a host-generated file manifest for fake_iso.
 3. Use `PS5_READY_LOG=/data/opengoal/log/gk.log` with
    `PS5_READY_PATTERN='\[startup\] entering the graphics loop'` once a run reaches that line.
 
+## Console state
+
+The last cycle installed the capability probe over the gk title (same title ID), so
+/data/homebrew/PPSA99005 currently holds the probe's eboot plus gk's data files from the
+earlier install. The next gk cycle replaces the eboot and re-verifies everything.
+
 ## Not done yet
 
 - Heap: both gk titles ran with ps5-opengl's default 128 MiB heap. A 1 GiB override was
   committed earlier but was never linked in (it sat in an archive); it was removed so the
   lstat fix was the only change. Raise it in ps5/title as its own run if memory runs short.
-- Probe leftovers: the 128 MiB EE mapping and commit, and fd 0 with MAP_ANONYMOUS, are still
-  unmeasured (the probe died in std::filesystem::current_path; that call is now removed).
 - No desktop build has been run; the modified sources pass a Linux syntax check only.
 - Jak 2, Jak 3 and Jak X kernels compile but did not get the System V call-path branches.
 - gfx_test.cpp has the same libGL load as opengl.cpp and was left alone.
@@ -82,3 +86,4 @@ which otherwise needs a host-generated file manifest for fake_iso.
 - 2026-10-12 | gk launch 1 | jak-project@94de4eafc | PS5 | no-run: console entered rest mode before the launch was delivered | evidence results/PPSA99005-20261012T213202Z
 - 2026-10-12 | gk launch 2 | jak-project@94de4eafc | PS5 | failed: ghc::filesystem lstat refused under /data at log setup | evidence results/PPSA99005-20261012T214014Z | next: lstat fallback
 - 2026-10-12 | gk launch 3 | jak-project@612866d28 | PS5 | partial-pass: startup log through GL loader (OpenGL 4.6 Core); stops on missing GAME.fr3 | evidence results/PPSA99005-20261012T214750Z | next: game data, executable-memory decision
+- 2026-10-12 | probe 2 | jak-project@032fa23ac | PS5 | pass: probe completes; EE mapping at its hint commits 128 MiB but is not executable; MAP_ANON needs fd -1; RTTI and exceptions work | evidence results/PPSA99005-20261012T215826Z

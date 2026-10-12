@@ -140,12 +140,22 @@ title under ShadowMount Plus (uid 1, 16 KiB pages). Evidence:
 | `std::thread`, mutex, condition variable, `thread_local`, `sleep_for` | work; 16 hardware threads |
 | `fs::exists` / `is_directory` on `/app0`, `/data`, `/download0` | work |
 | `fs::directory_iterator` on `/app0` and `/data/opengoal` | EPERM on both |
-| `fs::current_path` | the title died in this call (`pathconf` is not in the libc or libkernel export lists) |
+| `fs::current_path` | the title died in this call; without it the same probe completes |
 | Flexible memory available at start | 416 MiB; direct memory 11.4 GiB total |
 
-Not reached because of the `current_path` crash: the 128 MiB EE mapping and commit, RTTI,
-and exceptions. The crash left no new console error record, and the SDL3 example behind
-the probe did not run.
+A second run at `032fa23ac` (eboot `5fcd5649`, evidence `PPSA99005-20261012T215826Z`) with only
+the `fs::current_path` call removed ran to `[probe] complete`, and the SDL3 example behind it
+ran and closed cleanly. It repeated every result above and added:
+
+| Question | Result |
+|---|---|
+| `mmap` with `MAP_ANON` and fd `0`, as `runtime.cpp` does on desktop | EINVAL: PS5 needs fd `-1` |
+| 128 MiB at the hint `0x2123000000`, requested `RWX` | mapped at the hint, reported `RW` |
+| Zeroing all 128 MiB beside the 128 MiB title heap | works |
+| `mprotect` of the first 512 KiB to `PROT_NONE` | works |
+| RTTI (`dynamic_cast`) and a thrown, caught exception | work |
+
+So the one thing EE main memory lacks on PS5 is execute.
 
 Consequences:
 
