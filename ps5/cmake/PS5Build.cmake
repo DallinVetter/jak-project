@@ -36,6 +36,12 @@ target_compile_definitions(libzstd_static PRIVATE ZSTD_TRACE=0)
 build_third_party_lib(stb_image stb_image)
 build_third_party_lib(libco libco)
 build_third_party_lib(imgui imgui)
+# ImGui's OpenGL backend bundles its own GL loader, which opens libGL with dlopen. GL is linked
+# into the title, so make the backend use the entry points gk has already loaded through glad.
+set_source_files_properties("${PROJECT_SOURCE_DIR}/third-party/imgui/imgui_impl_opengl3.cpp"
+    TARGET_DIRECTORY imgui PROPERTIES
+    COMPILE_DEFINITIONS IMGUI_IMPL_OPENGL_LOADER_CUSTOM
+    COMPILE_OPTIONS "-include;${PROJECT_SOURCE_DIR}/third-party/glad/include/glad/glad.h")
 
 # Same options as the desktop build (Jak 2/3's built in editor).
 add_definitions(-DHAVE_USLEEP=1)
