@@ -57,6 +57,8 @@ def main():
                         help="object or static archive, in link order")
     parser.add_argument("--wrap", action="append", default=[],
                         help="extra symbol to link with --wrap")
+    parser.add_argument("--add-dir", action="append", default=[], metavar="SOURCE=DEST",
+                        help="copy a directory into the title folder (seen as /app0/DEST)")
     parser.add_argument("--cxx-runtime", action="store_true",
                         help="add the libc++ runtime shims (needed by iostreams, locale, "
                              "std::filesystem and thread_local destructors)")
@@ -79,6 +81,14 @@ def main():
         if not path.is_file():
             raise SystemExit(f"Missing input: {path}")
     inputs = {str(p): digest(p) for p in (*links, *sources)}
+    added = []
+    for item in args.add_dir:
+        source, separator, dest = item.partition("=")
+        if not separator or not dest or Path(dest).is_absolute() or ".." in Path(dest).parts:
+            parser.error(f"--add-dir wants SOURCE=DEST with a relative DEST: {item}")
+        if not Path(source).is_dir():
+            raise SystemExit(f"Missing directory: {source}")
+        added.append((Path(source).resolve(), dest))
 
     out.mkdir(parents=True)
     # Copy every potentially written dependency. No symlinks into canonical caches.
@@ -146,6 +156,9 @@ def main():
     run("bash", script, "Folder", env=env, cwd=out)
 
     candidate = out / "dist" / param["titleId"]
+    # After the template's build: it recreates the title folder. Its ZIP lacks these.
+    for source, dest in added:
+        shutil.copytree(source, candidate / dest)
     result = {"hardware_run": False,
               "jak_project_commit": run("git", "-C", ROOT, "rev-parse", "HEAD", capture_output=True,
                                         text=True).stdout.strip(),

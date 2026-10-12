@@ -12,7 +12,41 @@ Nothing here talks to a console. Hardware runs go through
   and SDL3 native build (`build/sdl3-native`).
 - The native-app boilerplate at the revision `../ps5-opengl/dependencies.json` pins, with
   its payload SDK fetched, and a `libc.prx` matching its `runtime/libc.prx.sha256`.
-- `clang-18`, `lld-18`, `ninja`, `python3`.
+- `clang-18`, `lld-18`, `cmake`, `ninja`, `nasm`, `ccache`, `python3`.
+
+## build_gk.sh
+
+```sh
+ps5/build_gk.sh                 # compile gk's dependency closure into build/ps5/cmake-gk
+ps5/build_gk.sh gk-001          # also link build/ps5/gk-001/dist/<TITLE>
+```
+
+Configures the top-level `CMakeLists.txt` with [cmake/toolchain.cmake](cmake/toolchain.cmake),
+which sets `PS5` and makes it include [cmake/PS5Build.cmake](cmake/PS5Build.cmake) instead of
+the desktop dependency list: `common`, `game` (the `runtime` library), `sound`, fmt, lzokay,
+zstd, stb_image, libco, imgui and sqlite3, compiled with the boilerplate's PS5 compiler wrapper.
+SDL is not built here: it is ps5-opengl's patched `libSDL3.a`, with that build's headers overlaid
+on the vendored ones. NASM is required for `game/kernel/asm_funcs_x86_64.asm`.
+
+CMake only compiles and archives. `stage_title.py` links the archives and `game/main.cpp`'s
+object, and adds the shaders and `game/assets` to the title folder as `/app0/data`, where the
+runtime looks for its project directory. Game data from the user's own disc is not added.
+
+## platform
+
+PS5-only sources linked into the title, so `common/` and `game/` need no branches for them:
+
+- `cubeb_null.cpp`: the cubeb entry points `snd::Player` uses, backed by a thread that pulls PCM
+  from the mixer at the stream's rate and discards it. Sound-engine timing is unchanged; nothing
+  reaches the audio hardware.
+- `unused_services.cpp`: Discord, libcurl and message-box entry points that report "unavailable".
+- `replxx_unused.cpp`: line-editor members that only goalc's REPL would call.
+
+## Logs
+
+The title writes `/data/opengoal/log/gk.log`, flushed on every line. Lines starting with
+`[startup]` mark the stages of startup in order; the last one in a failed run is how far it got.
+`/download0` is a disk image from the FTP side and cannot be watched by the hardware cycle.
 
 ## stage_title.py
 

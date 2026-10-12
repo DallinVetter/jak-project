@@ -205,6 +205,12 @@ function(build_third_party_lib dir_name target_name)
     )
 endfunction()
 
+# Native PS5 title: only gk's dependency closure, see ps5/README.md
+if(PS5)
+    include(ps5/cmake/PS5Build.cmake)
+    return()
+endif()
+
 # Dependencies and Libraries
 # - for reasons outside of my understanding, on some distros CMake can't find a library if it's
 # in `/usr/lib64` instead of `/usr/lib`.  This problem was encountered for libcurl not being able
