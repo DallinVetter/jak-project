@@ -63,9 +63,8 @@ title's and records the heap size in `candidate.json`.
 - `sandbox_fs.c`: `lstat` answered by `stat` when the sandbox refuses it (linked with
   `--wrap=lstat`). OpenGOAL's `fs::` is ghc::filesystem, which calls `lstat` for every status query.
 
-The heap is ps5-opengl's default: 128 MiB of flexible memory, with the libc heap behind it.
-A title raises it by defining `ps5_opengl_heap_size` in a source here (above 128 MiB the
-allocator uses direct memory; ps5-opengl's CTS runner uses 1 GiB).
+- `title_heap.c`: a 1 GiB heap from direct memory. With ps5-opengl's default (128 MiB of
+  flexible memory) gk runs out of memory while loading the common level's textures.
 
 ## Logs
 
