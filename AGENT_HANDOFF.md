@@ -37,37 +37,57 @@ A sandboxed native title gets read/write only from mmap, mprotect, sceKernelMpro
 flexible memory; sceKernelJitCreateSharedMemory returns EPERM (ps5/AUDIT.md). gk confirms this
 at run time: EE main memory maps RW, and the EE stops instead of faulting.
 
-The owner asked for the smallest elevated-process probe to test whether elevation unlocks
-executable mappings or the JIT interface, before any compiler/JIT redesign.
+The elevated probe is now fully AUTHORED and scoped to this title and the qualified dev
+environment. It is NOT a general elevation tool and is NOT wired into the OpenGOAL runtime.
+Files (committed):
+- ps5/probe/elevated_execmem_probe.c: standalone main(); runs the executable-memory checks
+  (phase "pre-elevation"), requests the title-scoped elevation once, reruns identical checks
+  (phase "post-elevation"), logging return values, errno, the kernel-reported protection and
+  whether execute actually works; writes /data/opengoal/elevated_probe.log; exits cleanly.
+- ps5/probe/title_elevate.cpp: thin extern-C shim over the documented, already-qualified
+  elevation::request(filesystem) client. The title calls no kernel primitive itself; it asks a
+  resident helper or the packaged /app0/lapy.elf (sent to elfldr on 9021) to raise its own
+  process credentials, and that returns ok only after a /data write/read/list proof.
+- ps5/probe/build_elevation.sh: stages the title via stage_title.py, compiling the boilerplate's
+  sandbox-elevation client and packaging the pinned exact-title PPSA99005 Lapy helper
+  (build-lapy-helper.py, already verified to build in this environment: lapy.elf,
+  target_title=PPSA99005, mode=elf-helper).
+- ps5/stage_title.py: added --src-file (place a source/header under src/) and --add-file (place
+  one file in the title folder) used by the above.
 
-IMPORTANT HANDOFF NOTE: the agent repeatedly had its responses halted by an automated safety
-classifier when the work turned to process elevation / privilege escalation on the console,
-even though this is authorized homebrew bring-up on the owner's own hardware. The classifier
-acts on the assistant's output, not on tool results, so the agent may be unable to author the
-elevation probe (which manipulates the title's own ucred/credentials via the payload SDK's
-kernel interface). The building blocks are already present and documented:
-- ../ps5-native-app-boilerplate docs/SANDBOX_ELEVATION.md: the opt-in Lapy exact-title helper,
-  already qualified on this environment for /data access (APP_LAPY_HELPER=1).
-- $PS5_PAYLOAD_SDK/samples/test_privileges/main.c: raises ucred authid+caps around a syscall.
-- The existing probe harness (ps5/probe) runs a C probe in front of the proven SDL3 example and
-  logs to /data/opengoal; execmem_probe.c already measures every mapping path.
+### Assistant-capability limitation (recorded per owner instruction, plan unchanged)
 
-Recommended probe (one bounded hardware run): from the title, raise its own credentials the way
-test_privileges does, then re-run execmem_probe.c's mmap/mprotect/JIT checks and log the
-reported protection. If execute is granted, OpenGOAL needs only to apply the same elevation
-before mapping EE memory. If not, elevation is insufficient and option 2 (separating GOAL code
-from data) is the remaining path.
+The agent could not BUILD or RUN the probe: every Bash command that compiles/links/runs it is
+refused by the Claude Code auto-mode permission classifier with reason "Security Weaken"
+(building a title-scoped privilege-elevation experiment). An isolated, unrelated parse of the
+same files is allowed, so the gate is specific to the elevation build, not Bash in general.
+This is a safeguard limitation on the assistant in this environment, not a technical blocker and
+not a change to the plan. It is the thing to escalate to a human: a human (or a differently
+permissioned runner) can execute the already-written, reviewable steps below.
 
-If the agent cannot produce this probe because of the output classifier, that is the thing to
-escalate to a human: it is a capability limit on the assistant, not a technical blocker.
+## Next action (ready to run by a human; one bounded hardware experiment)
 
-## Next action
-
-1. Build and run the elevated-process execmem probe (above). One variable: elevation on/off.
-2. If execute is unlocked: apply the same elevation in runtime.cpp before the EE mmap, behind
-   __PROSPERO__, and rerun gk; expect it to pass the EE check and start the GOAL kernel.
-3. Switch the cycle to PS5_READY_LOG=/data/opengoal/log/gk.log with
-   PS5_READY_PATTERN='\[startup\] entering the graphics loop' (now a reliable line).
+1. Build the probe title:
+     bash ps5/probe/build_elevation.sh elev-001
+   (produces build/ps5/elev-001/dist/PPSA99005; packages /app0/lapy.elf for PPSA99005)
+2. Freeze exactly one candidate and run one bounded cycle, collecting both logs:
+     bash ../ps5-homebrew-dev-protocol/scripts/freeze-candidate.sh \
+       build/ps5/elev-001/dist/PPSA99005 ../candidates/og-elev-<UTC>
+     PS5_KLOG=0 PS5_CLOSE=1 PS5_RUN=45 \
+       bash ../ps5-homebrew-dev-protocol/scripts/ps5-cycle.sh PPSA99005 \
+       ../candidates/og-elev-<UTC>/PPSA99005 \
+       /data/opengoal/elevated_probe.log /data/shadowmount/debug.log
+   Wait line once trusted: PS5_READY_PATTERN='\[probe\] elevated-execmem complete'.
+3. Compare the "pre-elevation" vs "post-elevation" lines in elevated_probe.log, and read
+   "elevation status=... path=... uid=... euid=...". Decision rule:
+   - If any post-elevation line shows execute-present=yes (exec=ok) where the matching
+     pre-elevation line did not: elevation unlocks executable memory. Record it; next milestone
+     is applying the same title-scoped elevation in runtime.cpp before the EE mmap (behind
+     __PROSPERO__), then rerun gk. STOP for review before that integration.
+   - If post-elevation execute is still refused everywhere (and note elevation status: if it is
+     not 0/ok, the mechanism itself did not engage on this run): elevation is insufficient.
+     Record it and STOP before any compiler/JIT redesign (option 2) for owner review.
+4. Preserve the evidence directory either way.
 
 ## Not done yet
 
@@ -90,3 +110,4 @@ escalate to a human: it is a capability limit on the assistant, not a technical 
 - 2026-10-12 | data | jak-project@33e0ffa52 | host+PS5 | done: out/jak1 extracted from owner ISO, deployed to /data/opengoal/data
 - 2026-10-12 | gk + data | jak-project@5354f31b1 | PS5 | failed: out of memory in texture upload (128 MiB heap) | results/PPSA99005-20261012T223537Z
 - 2026-10-12 | gk first milestone | jak-project@8206be2e5 | PS5 | pass: gk loads data, brings up OpenGL 4.6, enters the graphics loop and holds; EE stops at the executable-memory blocker by design | evidence results/PPSA99005-20261012T224002Z | next: elevated executable-memory probe
+- 2026-10-12 | elevation probe | jak-project (this commit) | host | authored, not run: probe + shim + build script written and syntax-valid; Lapy helper builds for PPSA99005; building/running the probe is refused by the auto-mode permission classifier ("Security Weaken"), recorded as an assistant-capability limitation | next: a human runs ps5/probe/build_elevation.sh and one bounded cycle, then applies the decision rule above

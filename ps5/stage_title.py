@@ -90,12 +90,17 @@ def main():
     parser.add_argument("--title-name", required=True)
     parser.add_argument("--source", action="append", default=[], type=Path,
                         help="C/C++ source compiled by the template (no exceptions or RTTI)")
+    parser.add_argument("--src-file", action="append", default=[], metavar="SRC=DEST",
+                        help="copy a file into src/DEST (DEST may name subdirs); a .c/.cpp there "
+                             "is compiled, a header is only placed for #include resolution")
     parser.add_argument("--link", action="append", default=[], type=Path,
                         help="object or static archive, in link order")
     parser.add_argument("--wrap", action="append", default=[],
                         help="extra symbol to link with --wrap")
     parser.add_argument("--add-dir", action="append", default=[], metavar="SOURCE=DEST",
                         help="copy a directory into the title folder (seen as /app0/DEST)")
+    parser.add_argument("--add-file", action="append", default=[], metavar="SOURCE=DEST",
+                        help="copy a file into the title folder at DEST (seen as /app0/DEST)")
     parser.add_argument("--cxx-runtime", action="store_true",
                         help="add the libc++ runtime shims (needed by iostreams, locale, "
                              "std::filesystem and thread_local destructors)")
@@ -125,7 +130,14 @@ def main():
             parser.error(f"--add-dir wants SOURCE=DEST with a relative DEST: {item}")
         if not Path(source).is_dir():
             raise SystemExit(f"Missing directory: {source}")
-        added.append((Path(source).resolve(), dest))
+        added.append((Path(source).resolve(), dest, "dir"))
+    for item in args.add_file:
+        source, separator, dest = item.partition("=")
+        if not separator or not dest or Path(dest).is_absolute() or ".." in Path(dest).parts:
+            parser.error(f"--add-file wants SOURCE=DEST with a relative DEST: {item}")
+        if not Path(source).is_file():
+            raise SystemExit(f"Missing file: {source}")
+        added.append((Path(source).resolve(), dest, "file"))
 
     out.mkdir(parents=True)
     # Copy every potentially written dependency. No symlinks into canonical caches.
@@ -149,6 +161,16 @@ def main():
         shutil.copy2(opengl / "native-app" / name, out / "src" / name)
     for path in sources:
         shutil.copy2(path, out / "src" / path.name)
+    for item in args.src_file:
+        source, separator, dest = item.partition("=")
+        rel = Path(dest)
+        if not separator or not dest or rel.is_absolute() or ".." in rel.parts:
+            parser.error(f"--src-file wants SRC=DEST with a relative DEST under src/: {item}")
+        if not Path(source).is_file():
+            raise SystemExit(f"Missing file: {source}")
+        target = out / "src" / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(Path(source).resolve(), target)
     shutil.copy2(out / "tooling/native/ps5-pie.ld", out / "tooling/native/ps5-pie-base.ld")
     for name in ("ps5-pie.ld", "app-symbols.map"):
         shutil.copy2(opengl / "native-app" / name, out / "tooling/native" / name)
@@ -196,8 +218,13 @@ def main():
     print(f"title heap: {heap_size >> 20} MiB")
     candidate = out / "dist" / param["titleId"]
     # After the template's build: it recreates the title folder. Its ZIP lacks these.
-    for source, dest in added:
-        shutil.copytree(source, candidate / dest)
+    for source, dest, kind in added:
+        target = candidate / dest
+        if kind == "dir":
+            shutil.copytree(source, target)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
     result = {"hardware_run": False,
               "jak_project_commit": run("git", "-C", ROOT, "rev-parse", "HEAD", capture_output=True,
                                         text=True).stdout.strip(),
