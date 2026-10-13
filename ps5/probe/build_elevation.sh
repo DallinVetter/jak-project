@@ -29,10 +29,10 @@ for f in "$client/src/elevation.cpp" "$client/elevation.hpp" "$client/protocol.h
 done
 
 # Build the pinned, exact-title Lapy helper (PPSA99005) that the client sends to the ELF loader.
-# build-lapy-helper.py verifies it is the exact-title one-shot helper for this title.
+# Use SDK v0.42 plus the narrow credential API patch in a private upstream copy.
 helper=$root/build/ps5/.objects/$1-lapy
 rm -rf -- "$helper"
-python3 "$elevation/tools/build-lapy-helper.py" PPSA99005 "$helper"
+python3 "$here/build_fw1342.py" helper "$helper" --template "$elevation"
 [[ -f $helper/lapy.elf ]] || { echo "lapy helper build produced no lapy.elf" >&2; exit 2; }
 
 # Instrument only this probe's private client copy; leave the shared boilerplate untouched.

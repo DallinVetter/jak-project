@@ -22,7 +22,8 @@
 - Console: available; nothing running; /data/opengoal/data populated.
 - State: first milestone done; the single diagnostic cycle reached EOF before the helper's
   first reply. Source/artifact inspection identifies missing FW 13.42 support in the helper's
-  pinned SDK v0.40 as the leading cause. Hardware is paused pending owner instruction.
+  pinned SDK v0.40 as the leading cause. The source-only SDK v0.42 compatibility step and
+  harmless stdio diagnostic now build and pass host checks. Hardware remains paused.
 
 ## What each run since real data established
 
@@ -65,10 +66,10 @@ Files (committed):
   resident helper or the packaged /app0/lapy.elf (sent to elfldr on 9021) to raise its own
   process credentials, and that returns ok only after a /data write/read/list proof.
 - ps5/probe/build_elevation.sh: stages the title via stage_title.py, compiling the boilerplate's
-  sandbox-elevation client and packaging the pinned exact-title PPSA99005 Lapy helper
-  (build-lapy-helper.py, already verified to build in this environment: lapy.elf,
-  target_title=PPSA99005, mode=elf-helper). For diagnostic builds, it now patches a private
-  elevation.cpp copy with ps5/probe/elevation_transport.patch; the sibling client stays untouched.
+  sandbox-elevation client and packaging the exact-title PPSA99005 Lapy helper through
+  ps5/probe/build_fw1342.py (SDK v0.42, private patched copy of the pinned Lapy source).
+  It patches a private elevation.cpp copy with ps5/probe/elevation_transport.patch;
+  the sibling client stays untouched. The updated helper is host-built, not hardware qualified.
 - ps5/probe/elevation_transport.patch: diagnostic-only run_helper()/exchange() logging to
   /data/opengoal/elevation_transport.log. Records helper open, socket creation, each socket
   option (0x1105/0x1106/0x1109), connect, read/stream byte counts (including partial sends),
@@ -135,27 +136,93 @@ Source anchors:
 [SDK v0.40 startup](https://github.com/ps5-payload-dev/sdk/blob/13ccc2d5bf2ac396cdf5007c2b72493cb3d5c8bb/crt/crt.c),
 [SDK v0.42 firmware gate](https://github.com/ps5-payload-dev/sdk/blob/4eb701204fc3f8d31e84cf8ca272974e2be9c867/crt/kernel.c).
 
-## Next action (stopped; awaiting owner direction)
+## Source-only compatibility step (built; not run)
 
-Do NOT run hardware again yet. No protocol, endpoint, validation, helper, SDK or runtime source
-was changed during this investigation; only this handoff was updated.
+Owner authorized implementation and host builds only. Changes are confined to ps5/probe/ and
+this handoff. The sibling boilerplate's pre-existing edits are preserved; the clean pinned Lapy
+source cache and both older frozen candidates remain unchanged.
 
-Smallest diagnostic: record the deployed elfldr revision and, if a further cycle is authorized,
-use a harmless SDK-v0.42 stdin/stdout echo payload on the existing connection to test fd handoff
-without elevation. A diagnostic CRT log must precede/cover __kernel_init() failure; logging only
-inside Lapy main() cannot observe the suspected failure. Keep diagnostic bytes off protocol
-stdio (stderr aliases the same socket too); use a separate log channel.
+- build_fw1342.py pins SDK v0.42 revision `4eb701204fc3f8d31e84cf8ca272974e2be9c867` and
+  release archive SHA-256 `8cfbc7cd5811e719eb4f0c47eea668d3dc7b40bc8ab11c4a5031d40c23ec02da`.
+  It checks the clean source revision and explicit 13.42 case, verifies installed SDK files
+  against the archive on every invocation, and builds in ignored build/ps5/ directories.
+  It copies tracked files from Lapy `54a095c0f19161825e845daa760a03b446e654fa` into a private
+  build tree, applies lapy_sdk042.patch with zero fuzz, invokes upstream's owned-helper target
+  for PPSA99005, and verifies the original manifest/ELF/protocol requirements. Manifests record
+  SDK/source/patch/compiler provenance and retain console_validated=false, validated_firmware=[].
+- lapy_sdk042.patch changes attrs from uint64_t to uint8_t[32], checks the attribute getter,
+  UID/GID getter error sentinels and authid failure, compares all 32 bytes, and retains checked
+  full-buffer setters, read-back verification and the original restoration/rollback flow.
+  SDK v0.42's attribute base is 0x80 rather than 0x83: the original ptrace bit is now
+  `attrs[3] |= 0x80`, not attrs[0]. Other attribute bytes are preserved. The protocol, PID/title,
+  directory/group/thread/root-layout preflight and /data proof are unchanged; no firmware alias.
+- elfldr_stdio.c reads exactly `OGSTDIO-REQ-v1!\n` (16 bytes) from fd 0 and writes exactly
+  `OGSTDIO-ACK-v1!\n` (16 bytes) to fd 1 only after request/firmware validation. One monotonic
+  5-second deadline bounds the complete exchange. It logs build ID/main/firmware/read/reply
+  checkpoints only to /data/opengoal/elfldr_stdio.log. It never logs to stdin/stdout/stderr.
+- elfldr_stdio_crt.c uses the pinned SDK's _start.S and syscall.c, clears its own BSS, initializes
+  the syscall entry, reads the firmware via sysctl, calls main and exits the disposable child.
+  The stock SDK CRT changes credentials/syscall permissions before main; linking it would
+  violate the harmless diagnostic requirement. This minimal CRT links no kernel-access,
+  credential-patching, dynamic-loader or protection-changing code and has no undefined imports.
+  A diagnostic pass proves this patch-free SDK entry/syscall initialization and inherited stdio;
+  it does NOT prove full stock CRT initialization or Lapy preflight/elevation.
+- build_elevation.sh now calls the local compatibility builder; its client/protocol/transport
+  logging and endpoint are unchanged. No native title was staged during this source-only step.
+- test_fw1342.py compiles the actual patched credential functions against host mocks. It checks
+  full 32-byte save/compare/restore (including a byte-31 mismatch), correct byte-3 bit placement,
+  all nine getter/read failures, all nine setter/write failures and read-back failure handling.
+  Diagnostic tests force partial reads/writes, invalid/short requests, timeout and wrong firmware.
 
-Smallest supported compatibility direction: build the helper with a pinned SDK that explicitly
-supports 13.42 (v0.42 has that case), adapting Lapy's credential attributes from uint64_t to the
-new 32-byte get/set API with checked results and full save/compare/restore. This is not a blind
-SDK switch: v0.41+ changed that API. Regenerate and verify build/protocol manifests honestly;
-keep all title/PID, layout, preparation and /data proof checks. Do not alias 13.42 to 13.20:
-v0.42 has different ALLPROC and ROOTVNODE addresses for 13.40/13.42. SDK coverage permits
-startup, not a claim that Lapy's runtime layout validation or elevation will pass.
+Builds/checks passed:
 
-Stop for owner review before any implementation, next hardware cycle, integration into
-runtime.cpp or compiler/JIT redesign. Do not touch ISO or extracted game data.
+```sh
+python3 ps5/probe/build_fw1342.py all build/ps5/fw1342-007
+python3 ps5/probe/test_fw1342.py build/ps5/fw1342-007/helper/source
+make -C ../ps5-native-app-boilerplate test-elevation HOST_CXX=clang++-18
+```
+
+Both PS5-target builds use warnings as errors; the diagnostic allows GNU C for the pinned SDK's
+assembly and suppresses only its driver's unused link-argument warning. Six host tests and the
+existing resident/helper exchange/proof tests pass. Independently recomputed both build IDs,
+all recorded SDK/source hashes and ELF hashes. Checked exact ELF framing for both artifacts,
+verified the helper's linked CRT includes 0x13420000, and byte-compared the helper's entire
+protocol/title/PID/preflight section with the pin. Shell/Python syntax and git diff checks pass.
+game/runtime.cpp and desktop CMake configuration are unchanged. No ISO/extracted game data,
+console endpoint or OpenGOAL runtime code was touched. Compiler: Ubuntu clang 18.1.8 (20ubuntu8).
+
+Host artifacts (unfrozen, undeployed, not console validated):
+
+- Diagnostic: build/ps5/fw1342-007/stdio/elfldr-stdio.elf | 50880 bytes
+  - build ID `93e5494a41ec203f873cd1cd3584ecf8a1f5bf0ee6fecb2def5568eb9e818f1a`
+  - SHA-256 `d612875c8547228e021396a07348a820942835ff369204a528f18b3f0be75173`
+  - manifest: build/ps5/fw1342-007/stdio/manifest.json
+- Lapy: build/ps5/fw1342-007/helper/lapy.elf | 155072 bytes | PPSA99005 | elf-helper
+  - build ID `0909c9ea63713f32c17ffc86cb0e22d25390e0a3fc96a08e5c096af61dc5b820`
+  - SHA-256 `87cf3943cea045865a20ca62fe348dc86fbe94010c59ae2c052cc402dc2d0ff5`
+  - manifests: build/ps5/fw1342-007/helper/{lapy-manifest.json,manifest.json}
+
+## Next action (stopped; awaiting explicit hardware authorization)
+
+Recommend ONE standalone harmless loader experiment, with PPSA99005 closed and the declared
+services healthy, using the normal shared-console lock/evidence procedure. First record the
+deployed elfldr revision if its provenance is available. Use only the diagnostic artifact above:
+
+1. After authorization, preserve/verify these exact diagnostic bytes. Open ONE connection to
+   the existing elfldr endpoint on TCP 9021 (10-second connect timeout).
+2. Send the complete 50880-byte diagnostic ELF, then `OGSTDIO-REQ-v1!\n` on that SAME
+   connection, keeping it open for the reply. Use a 15-second total host transfer/reply deadline;
+   the payload's own exchange deadline is 5 seconds. No retry or second payload.
+3. Require exactly `OGSTDIO-ACK-v1!\n` (16 bytes), then orderly EOF as the diagnostic exits.
+   Retrieve /data/opengoal/elfldr_stdio.log through existing FTP and require matching build ID,
+   firmware=13.42, request bytes=16 valid=1 and reply bytes=16 success=1. Preserve host byte
+   counts/response/hash and log under ../ps5-homebrew-dev-protocol/results/ELFLDR-STDIO-<UTC>/.
+4. Confirm elfldr/FTP remain healthy, release the lock and STOP for review. Classify failure or
+   missing evidence without retry. This run tests the minimal diagnostic only; qualification of
+   the updated Lapy helper is a separate future experiment requiring owner instruction.
+
+No artifact was frozen, deployed or run during this step. No native elevation probe, Lapy
+payload, title launch/close, runtime.cpp integration or compiler/JIT redesign is authorized now.
 
 ## Not done yet
 
@@ -181,3 +248,4 @@ runtime.cpp or compiler/JIT redesign. Do not touch ISO or extracted game data.
 - 2026-10-12 | elevation probe | jak-project@8350fab12 | host | authored, not run at that point: probe + shim + build script written and syntax-valid; Lapy helper builds for PPSA99005; building/running the probe is refused by the auto-mode permission classifier ("Security Weaken"), recorded then as an assistant-capability limitation; superseded by the owner-reported hardware result above
 - 2026-10-12 | elevation transport | hardware result reported by owner: status=9 / helper / transport_error; elfldr reachable on 9021, downloadDataSize=256, title healthy and closed cleanly; diagnostic-only transport logging added and locally checked | next: one explicitly authorized bounded hardware rerun to inspect elevation_transport.log
 - 2026-10-13 | elevation diagnostic | 071eba480 | PS5 | transport-failure: first reply EOF | ../ps5-homebrew-dev-protocol/results/PPSA99005-20261013T025138Z | stopped; SDK v0.40 lacks FW 13.42
+- 2026-10-13 | FW13.42 compatibility | host | pass: SDK v0.42 helper + harmless stdio ELF built; host checks pass | build/ps5/fw1342-007 | next: one owner-authorized stdio run
