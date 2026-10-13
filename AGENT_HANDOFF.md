@@ -20,7 +20,8 @@
   closed it cleanly. No new console error record. The EE stopped exactly where designed:
   "EE main memory ... granted protection 0x3 ... is not executable: GOAL code cannot run."
 - Console: available; nothing running; /data/opengoal/data populated.
-- State: first milestone done; blocked-on-decision at the executable-memory probe (see below).
+- State: first milestone done; debugging the elevation helper transport before drawing any
+  conclusion about elevated executable-memory policy (see below).
 
 ## What each run since real data established
 
@@ -31,15 +32,25 @@
 - With both fixed, gk reaches and holds the graphics loop. The renderer draws without the EE,
   so the title stays up; the game cannot advance because GOAL code cannot execute.
 
-## Blocker: executable memory (owner chose option 1 = elevation)
+## Current blocker: elevation helper transport (owner chose option 1 = elevation)
 
 A sandboxed native title gets read/write only from mmap, mprotect, sceKernelMprotect and
 flexible memory; sceKernelJitCreateSharedMemory returns EPERM (ps5/AUDIT.md). gk confirms this
 at run time: EE main memory maps RW, and the EE stops instead of faulting.
 
-The elevated probe is now fully AUTHORED and scoped to this title and the qualified dev
-environment. It is NOT a general elevation tool and is NOT wired into the OpenGOAL runtime.
+The elevated probe is scoped to this title and the qualified dev environment, and is not wired
+into the OpenGOAL runtime. The owner reports the first hardware run completed cleanly but
+elevation did not engage:
+
+- elevation status=9 / path=helper / Status::transport_error.
+- /app0/lapy.elf exists and opens; downloadDataSize=256.
+- elfldr is reachable from the dev VM on PS5 TCP port 9021. This does not establish that the
+  title can connect to 127.0.0.1:9021 or that the helper protocol completed.
+- The title stayed healthy and closed cleanly. Pre/post execmem results were identical because
+  elevation did not engage; this run does not establish elevated executable-memory policy.
+
 Files (committed):
+
 - ps5/probe/elevated_execmem_probe.c: standalone main(); runs the executable-memory checks
   (phase "pre-elevation"), requests the title-scoped elevation once, reruns identical checks
   (phase "post-elevation"), logging return values, errno, the kernel-reported protection and
@@ -51,43 +62,35 @@ Files (committed):
 - ps5/probe/build_elevation.sh: stages the title via stage_title.py, compiling the boilerplate's
   sandbox-elevation client and packaging the pinned exact-title PPSA99005 Lapy helper
   (build-lapy-helper.py, already verified to build in this environment: lapy.elf,
-  target_title=PPSA99005, mode=elf-helper).
+  target_title=PPSA99005, mode=elf-helper). For diagnostic builds, it now patches a private
+  elevation.cpp copy with ps5/probe/elevation_transport.patch; the sibling client stays untouched.
+- ps5/probe/elevation_transport.patch: diagnostic-only run_helper()/exchange() logging to
+  /data/opengoal/elevation_transport.log. Records helper open, socket creation, each socket
+  option (0x1105/0x1106/0x1109), connect, read/stream byte counts (including partial sends),
+  request send, first receive, prepare reply kind/status, preparation, prepared send, final
+  receive/reply, and helper status/close results. Logging saves/restores errno. Socket-option
+  failures, short-circuiting, endpoint, protocol validation and return behavior are preserved.
 - ps5/stage_title.py: added --src-file (place a source/header under src/) and --add-file (place
   one file in the title folder) used by the above.
 
-### Assistant-capability limitation (recorded per owner instruction, plan unchanged)
+## Next action (awaiting explicit owner instruction for hardware)
 
-The agent could not BUILD or RUN the probe: every Bash command that compiles/links/runs it is
-refused by the Claude Code auto-mode permission classifier with reason "Security Weaken"
-(building a title-scoped privilege-elevation experiment). An isolated, unrelated parse of the
-same files is allowed, so the gate is specific to the elevation build, not Bash in general.
-This is a safeguard limitation on the assistant in this environment, not a technical blocker and
-not a change to the plan. It is the thing to escalate to a human: a human (or a differently
-permissioned runner) can execute the already-written, reviewable steps below.
+Local patch application, C++ escaping, shell syntax and PS5-target compilation are checked
+without running the helper or title. No diagnostic hardware cycle has been launched.
 
-## Next action (ready to run by a human; one bounded hardware experiment)
+The next experiment is ONE bounded hardware rerun to inspect
+/data/opengoal/elevation_transport.log and identify the exact source of transport_error.
+Run that hardware cycle only when the owner explicitly requests it:
 
-1. Build the probe title:
-     bash ps5/probe/build_elevation.sh elev-001
-   (produces build/ps5/elev-001/dist/PPSA99005; packages /app0/lapy.elf for PPSA99005)
-2. Freeze exactly one candidate and run one bounded cycle, collecting both logs:
-     bash ../ps5-homebrew-dev-protocol/scripts/freeze-candidate.sh \
-       build/ps5/elev-001/dist/PPSA99005 ../candidates/og-elev-<UTC>
-     PS5_KLOG=0 PS5_CLOSE=1 PS5_RUN=45 \
-       bash ../ps5-homebrew-dev-protocol/scripts/ps5-cycle.sh PPSA99005 \
-       ../candidates/og-elev-<UTC>/PPSA99005 \
-       /data/opengoal/elevated_probe.log /data/shadowmount/debug.log
-   Wait line once trusted: PS5_READY_PATTERN='\[probe\] elevated-execmem complete'.
-3. Compare the "pre-elevation" vs "post-elevation" lines in elevated_probe.log, and read
-   "elevation status=... path=... uid=... euid=...". Decision rule:
-   - If any post-elevation line shows execute-present=yes (exec=ok) where the matching
-     pre-elevation line did not: elevation unlocks executable memory. Record it; next milestone
-     is applying the same title-scoped elevation in runtime.cpp before the EE mmap (behind
-     __PROSPERO__), then rerun gk. STOP for review before that integration.
-   - If post-elevation execute is still refused everywhere (and note elevation status: if it is
-     not 0/ok, the mechanism itself did not engage on this run): elevation is insufficient.
-     Record it and STOP before any compiler/JIT redesign (option 2) for owner review.
-4. Preserve the evidence directory either way.
+1. Build a new probe stage with bash ps5/probe/build_elevation.sh <new-stage-name>.
+2. Freeze that candidate and run one bounded cycle, collecting elevated_probe.log,
+   elevation_transport.log and the usual title/loader evidence; close the title cleanly.
+3. Inspect the transport log in order. Any failed socket option must remain a failure; do not
+   bypass it, change 127.0.0.1:9021, alter the protocol, or weaken validation to advance.
+4. Assess executable-memory results only if elevation actually returns ok. If transport still
+   fails, diagnose the failing stage before drawing conclusions about executable-memory policy.
+5. Preserve evidence. Stop for owner review before integrating elevation into runtime.cpp or
+   redesigning the compiler/JIT. Do not touch ISO or extracted game data.
 
 ## Not done yet
 
@@ -110,4 +113,5 @@ permissioned runner) can execute the already-written, reviewable steps below.
 - 2026-10-12 | data | jak-project@33e0ffa52 | host+PS5 | done: out/jak1 extracted from owner ISO, deployed to /data/opengoal/data
 - 2026-10-12 | gk + data | jak-project@5354f31b1 | PS5 | failed: out of memory in texture upload (128 MiB heap) | results/PPSA99005-20261012T223537Z
 - 2026-10-12 | gk first milestone | jak-project@8206be2e5 | PS5 | pass: gk loads data, brings up OpenGL 4.6, enters the graphics loop and holds; EE stops at the executable-memory blocker by design | evidence results/PPSA99005-20261012T224002Z | next: elevated executable-memory probe
-- 2026-10-12 | elevation probe | jak-project (this commit) | host | authored, not run: probe + shim + build script written and syntax-valid; Lapy helper builds for PPSA99005; building/running the probe is refused by the auto-mode permission classifier ("Security Weaken"), recorded as an assistant-capability limitation | next: a human runs ps5/probe/build_elevation.sh and one bounded cycle, then applies the decision rule above
+- 2026-10-12 | elevation probe | jak-project@8350fab12 | host | authored, not run at that point: probe + shim + build script written and syntax-valid; Lapy helper builds for PPSA99005; building/running the probe is refused by the auto-mode permission classifier ("Security Weaken"), recorded then as an assistant-capability limitation; superseded by the owner-reported hardware result above
+- 2026-10-12 | elevation transport | hardware result reported by owner: status=9 / helper / transport_error; elfldr reachable on 9021, downloadDataSize=256, title healthy and closed cleanly; diagnostic-only transport logging added and locally checked | next: one explicitly authorized bounded hardware rerun to inspect elevation_transport.log

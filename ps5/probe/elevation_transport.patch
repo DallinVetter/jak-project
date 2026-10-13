@@ -1,0 +1,188 @@
+--- a/elevation.cpp
++++ b/elevation.cpp
+@@ -41,6 +41,20 @@
+     int sceNetSetsockopt(int socket, int level, int option, const void *value, std::uint32_t size);
+     int sceNetSocket(const char *name, int domain, int type, int protocol);
+     int sceNetSocketClose(int socket);
++}
++
++// Probe-only diagnostics. Logging must not change the transport's errno.
++template <typename... Args>
++void transport_log(const char *format, Args... args) noexcept
++{
++    const int saved_errno = errno;
++    if (FILE *log = std::fopen("/data/opengoal/elevation_transport.log", "a"))
++    {
++        std::fprintf(log, format, args...);
++        std::fputc('\n', log);
++        (void)std::fclose(log);
++    }
++    errno = saved_errno;
+ }
+
+ class File
+@@ -233,28 +247,49 @@
+     return {proof_failed ? Status::apply_failed : Status::timeout, !proof_failed};
+ }
+
+-bool send_all(int socket, const void *data, std::size_t size) noexcept
+-{
+-    return elevation::wire::transfer(static_cast<const std::uint8_t *>(data), size,
+-                                     [socket](const auto *bytes, std::size_t remaining)
+-                                     { return sceNetSend(socket, bytes, remaining, 0); });
+-}
+-
+-bool receive(int socket, elevation::wire::Message &message) noexcept
+-{
+-    return elevation::wire::transfer(reinterpret_cast<std::uint8_t *>(&message), sizeof(message),
+-                                     [socket](auto *bytes, std::size_t remaining)
+-                                     { return sceNetRecv(socket, bytes, remaining, 0); });
++bool send_all(int socket, const void *data, std::size_t size,
++              const char *phase, std::size_t *streamed_bytes = nullptr) noexcept
++{
++    const bool sent = elevation::wire::transfer(
++        static_cast<const std::uint8_t *>(data), size,
++        [socket, phase, streamed_bytes](const auto *bytes, std::size_t remaining)
++        {
++            const int count = sceNetSend(socket, bytes, remaining, 0);
++            transport_log("%s sceNetSend requested=%zu result=%d errno=%d",
++                          phase, remaining, count, errno);
++            if (streamed_bytes && count > 0 && static_cast<std::size_t>(count) <= remaining)
++                *streamed_bytes += static_cast<std::size_t>(count);
++            return count;
++        });
++    transport_log("%s send_all bytes=%zu result=%d errno=%d", phase, size, sent, errno);
++    return sent;
++}
++
++bool receive(int socket, elevation::wire::Message &message, const char *phase) noexcept
++{
++    const bool received = elevation::wire::transfer(
++        reinterpret_cast<std::uint8_t *>(&message), sizeof(message),
++        [socket, phase](auto *bytes, std::size_t remaining)
++        {
++            const int count = sceNetRecv(socket, bytes, remaining, 0);
++            transport_log("%s sceNetRecv requested=%zu result=%d errno=%d",
++                          phase, remaining, count, errno);
++            return count;
++        });
++    transport_log("%s receive result=%d errno=%d", phase, received, errno);
++    return received;
+ }
+
+ elevation::Status exchange(int socket, const elevation::wire::Message &request) noexcept
+ {
+     using namespace elevation;
+-    if (!send_all(socket, &request, sizeof(request)))
++    if (!send_all(socket, &request, sizeof(request), "request"))
+         return Status::transport_error;
+     wire::Message reply{};
+-    if (!receive(socket, reply))
++    if (!receive(socket, reply, "first"))
+         return Status::transport_error;
++    transport_log("prepare_reply kind=%u status=%u",
++                  static_cast<unsigned>(reply.kind), static_cast<unsigned>(reply.status));
+     if (wire::matches(reply, request, wire::Kind::response) && reply.status != Status::ok)
+         return reply.status;
+     if (!wire::matches(reply, request, wire::Kind::prepare) || reply.status != Status::ok)
+@@ -262,10 +297,17 @@
+
+     wire::Message prepared = request;
+     prepared.kind = wire::Kind::prepared;
+-    if (seteuid(geteuid()) != 0)
++    const int prepare_result = seteuid(geteuid());
++    transport_log("prepare seteuid result=%d errno=%d", prepare_result, errno);
++    if (prepare_result != 0)
+         prepared.status = Status::prepare_failed;
+-    if (!send_all(socket, &prepared, sizeof(prepared)) || !receive(socket, reply))
++    transport_log("prepared kind=%u status=%u",
++                  static_cast<unsigned>(prepared.kind), static_cast<unsigned>(prepared.status));
++    if (!send_all(socket, &prepared, sizeof(prepared), "prepared") ||
++        !receive(socket, reply, "final"))
+         return Status::transport_error;
++    transport_log("final_reply kind=%u status=%u",
++                  static_cast<unsigned>(reply.kind), static_cast<unsigned>(reply.status));
+     if (!wire::matches(reply, request, wire::Kind::response))
+         return Status::protocol_error;
+     if (prepared.status != Status::ok)
+@@ -276,12 +318,16 @@
+ elevation::Status run_helper(const char *path, const elevation::wire::Message &request) noexcept
+ {
+     using elevation::Status;
++    transport_log("helper begin pid=%u path=%s", static_cast<unsigned>(request.pid),
++                  path ? path : "(null)");
+     if (path == nullptr)
+         return Status::invalid_request;
+     File helper{open(path, O_RDONLY)};
++    transport_log("open path=%s result=%d errno=%d", path, helper.get(), errno);
+     if (helper.get() < 0)
+         return Status::unavailable;
+     const int socket = sceNetSocket("lapy_owned_helper", 2, 1, 6);
++    transport_log("sceNetSocket result=%d errno=%d", socket, errno);
+     if (socket < 0)
+         return Status::transport_error;
+
+@@ -290,8 +336,12 @@
+     constexpr int timeout_us = elevation::wire::io_timeout_us;
+     bool configured = true;
+     for (const int option : {0x1105, 0x1106, 0x1109})
+-        configured &=
+-            sceNetSetsockopt(socket, socket_level, option, &timeout_us, sizeof(timeout_us)) >= 0;
++    {
++        const int result =
++            sceNetSetsockopt(socket, socket_level, option, &timeout_us, sizeof(timeout_us));
++        transport_log("sceNetSetsockopt option=0x%x result=%d errno=%d", option, result, errno);
++        configured &= result >= 0;
++    }
+     constexpr std::uint16_t port = 9021;
+     const NetSockaddrIn endpoint{sizeof(NetSockaddrIn),
+                                  2,
+@@ -299,25 +349,45 @@
+                                  0x0100007f,
+                                  0,
+                                  {0}};
+-    if (configured && sceNetConnect(socket, &endpoint, sizeof(endpoint)) >= 0)
++    int connected = -1;
++    if (configured)
++    {
++        connected = sceNetConnect(socket, &endpoint, sizeof(endpoint));
++        transport_log("sceNetConnect address=127.0.0.1 port=9021 result=%d errno=%d",
++                      connected, errno);
++    }
++    else
++        transport_log("sceNetConnect skipped: configured=%d", configured);
++    if (configured && connected >= 0)
+     {
+         std::array<std::uint8_t, 4096> buffer{};
+         bool streamed = true;
++        std::size_t bytes_read = 0;
++        std::size_t bytes_streamed = 0;
+         for (;;)
+         {
+             const auto count = read(helper.get(), buffer.data(), buffer.size());
++            if (count > 0)
++                bytes_read += static_cast<std::size_t>(count);
++            transport_log("helper read result=%ld errno=%d read_bytes=%zu streamed_bytes=%zu",
++                          static_cast<long>(count), errno, bytes_read, bytes_streamed);
+             if (count == 0)
+                 break;
+-            if (count < 0 || !send_all(socket, buffer.data(), static_cast<std::size_t>(count)))
++            if (count < 0 || !send_all(socket, buffer.data(), static_cast<std::size_t>(count),
++                                       "helper", &bytes_streamed))
+             {
+                 streamed = false;
+                 break;
+             }
+         }
++        transport_log("helper stream result=%d read_bytes=%zu streamed_bytes=%zu errno=%d",
++                      streamed, bytes_read, bytes_streamed, errno);
+         if (streamed)
+             status = exchange(socket, request);
+     }
+-    (void)sceNetSocketClose(socket);
++    transport_log("helper return status=%u errno=%d", static_cast<unsigned>(status), errno);
++    const int closed = sceNetSocketClose(socket);
++    transport_log("sceNetSocketClose result=%d errno=%d", closed, errno);
+     return status;
+ }
+ } // namespace

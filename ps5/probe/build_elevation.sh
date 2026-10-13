@@ -35,6 +35,10 @@ rm -rf -- "$helper"
 python3 "$elevation/tools/build-lapy-helper.py" PPSA99005 "$helper"
 [[ -f $helper/lapy.elf ]] || { echo "lapy helper build produced no lapy.elf" >&2; exit 2; }
 
+# Instrument only this probe's private client copy; leave the shared boilerplate untouched.
+cp -- "$client/src/elevation.cpp" "$helper/elevation.cpp"
+patch --batch --forward --fuzz=0 "$helper/elevation.cpp" < "$here/elevation_transport.patch"
+
 libc_args=()
 [[ -f $template/runtime/libc.prx ]] || libc_args=(--libc-prx "$libc_prx")
 python3 "$root/ps5/stage_title.py" --out "$out" --ps5-opengl "$opengl" --gl-sdk "$gl_sdk" \
@@ -42,7 +46,7 @@ python3 "$root/ps5/stage_title.py" --out "$out" --ps5-opengl "$opengl" --gl-sdk 
     --title-name "OpenGOAL PS5 elevated execmem probe" \
     --source "$here/elevated_execmem_probe.c" \
     --source "$here/title_elevate.cpp" \
-    --src-file "$client/src/elevation.cpp=sandbox-elevation/src/elevation.cpp" \
+    --src-file "$helper/elevation.cpp=sandbox-elevation/src/elevation.cpp" \
     --src-file "$client/elevation.hpp=sandbox-elevation/elevation.hpp" \
     --src-file "$client/protocol.hpp=sandbox-elevation/protocol.hpp" \
     --add-file "$helper/lapy.elf=lapy.elf"
