@@ -23,7 +23,9 @@
 - State: first milestone done; the single diagnostic cycle reached EOF before the helper's
   first reply. Source/artifact inspection identifies missing FW 13.42 support in the helper's
   pinned SDK v0.40 as the leading cause. The source-only SDK v0.42 compatibility step and
-  harmless stdio diagnostic now build and pass host checks. Hardware remains paused.
+  harmless stdio diagnostic build and pass host checks. ONE owner-authorized standalone
+  stdio run also returned EOF before its first reply; main/firmware/request-read remain
+  unconfirmed because no diagnostic log was collected. Hardware is stopped; Lapy remains unrun.
 
 ## What each run since real data established
 
@@ -136,7 +138,7 @@ Source anchors:
 [SDK v0.40 startup](https://github.com/ps5-payload-dev/sdk/blob/13ccc2d5bf2ac396cdf5007c2b72493cb3d5c8bb/crt/crt.c),
 [SDK v0.42 firmware gate](https://github.com/ps5-payload-dev/sdk/blob/4eb701204fc3f8d31e84cf8ca272974e2be9c867/crt/kernel.c).
 
-## Source-only compatibility step (built; not run)
+## Source-only compatibility step (built; Lapy not run)
 
 Owner authorized implementation and host builds only. Changes are confined to ps5/probe/ and
 this handoff. The sibling boilerplate's pre-existing edits are preserved; the clean pinned Lapy
@@ -191,7 +193,7 @@ protocol/title/PID/preflight section with the pin. Shell/Python syntax and git d
 game/runtime.cpp and desktop CMake configuration are unchanged. No ISO/extracted game data,
 console endpoint or OpenGOAL runtime code was touched. Compiler: Ubuntu clang 18.1.8 (20ubuntu8).
 
-Host artifacts (unfrozen, undeployed, not console validated):
+Host artifacts (helper undeployed/unrun; diagnostic run recorded below):
 
 - Diagnostic: build/ps5/fw1342-007/stdio/elfldr-stdio.elf | 50880 bytes
   - build ID `93e5494a41ec203f873cd1cd3584ecf8a1f5bf0ee6fecb2def5568eb9e818f1a`
@@ -202,27 +204,50 @@ Host artifacts (unfrozen, undeployed, not console validated):
   - SHA-256 `87cf3943cea045865a20ca62fe348dc86fbe94010c59ae2c052cc402dc2d0ff5`
   - manifests: build/ps5/fw1342-007/helper/{lapy-manifest.json,manifest.json}
 
-## Next action (stopped; awaiting explicit hardware authorization)
+## Standalone stdio hardware result (2026-10-13 UTC)
 
-Recommend ONE standalone harmless loader experiment, with PPSA99005 closed and the declared
-services healthy, using the normal shared-console lock/evidence procedure. First record the
-deployed elfldr revision if its provenance is available. Use only the diagnostic artifact above:
+The owner explicitly authorized ONE harmless standalone run of only
+build/ps5/fw1342-007/stdio/elfldr-stdio.elf. Classification: transport-failure before a confirmed
+payload execution/reply boundary. Evidence:
+../ps5-homebrew-dev-protocol/results/ELFLDR-STDIO-20261013T034103Z
+(result.json, assessment.json, cycle.log, reply.bin, baseline/after console and ShadowMount
+snapshots, loader-provenance.json, preserved payload/manifest and SHA256SUMS).
 
-1. After authorization, preserve/verify these exact diagnostic bytes. Open ONE connection to
-   the existing elfldr endpoint on TCP 9021 (10-second connect timeout).
-2. Send the complete 50880-byte diagnostic ELF, then `OGSTDIO-REQ-v1!\n` on that SAME
-   connection, keeping it open for the reply. Use a 15-second total host transfer/reply deadline;
-   the payload's own exchange deadline is 5 seconds. No retry or second payload.
-3. Require exactly `OGSTDIO-ACK-v1!\n` (16 bytes), then orderly EOF as the diagnostic exits.
-   Retrieve /data/opengoal/elfldr_stdio.log through existing FTP and require matching build ID,
-   firmware=13.42, request bytes=16 valid=1 and reply bytes=16 success=1. Preserve host byte
-   counts/response/hash and log under ../ps5-homebrew-dev-protocol/results/ELFLDR-STDIO-<UTC>/.
-4. Confirm elfldr/FTP remain healthy, release the lock and STOP for review. Classify failure or
-   missing evidence without retry. This run tests the minimal diagnostic only; qualification of
-   the updated Lapy helper is a separate future experiment requiring owner instruction.
+- Verified the exact authorized SHA-256 and 50880-byte size, preserved those bytes locally,
+  acquired the configured shared-console lock with exclusive creation and an ownership token.
+  Read-only FTP preflight confirmed PPSA99005 closed, no other title running and FTP healthy.
+- The single diagnostic connection established TCP 9021 health before any send. Sent all
+  50880 ELF bytes, then exactly `OGSTDIO-REQ-v1!\n` (16 bytes) on that SAME connection and
+  kept it open. Used the documented 10-second connect timeout and 15-second total
+  transfer/reply/EOF deadline; the unchanged payload has a 5-second exchange deadline.
+- First recv(requested=16) returned 0: orderly EOF with zero reply bytes. Exact reply received:
+  empty (reply.bin is zero bytes), not `OGSTDIO-ACK-v1!\n`. No retry or second payload was sent.
+- main() reached: UNCONFIRMED. Detected firmware: UNCONFIRMED. Payload request read/validation
+  and reply write: UNCONFIRMED. Both baseline and post-run retrieval of
+  /data/opengoal/elfldr_stdio.log returned FTP 550; no diagnostic log was saved. Empty
+  new_stdio.log is a local placeholder, not an empty remote log. Missing checkpoints alone
+  cannot prove main() was never reached or establish the detected firmware.
+- Kernel-log collection was unavailable: the existing TCP 3232 service refused the connection.
+  Normal FTP console/error-record and ShadowMount evidence was captured. Post-run PPSA99005
+  remained closed with no other title running; the newest error-record snapshot was unchanged.
+- FTP remained responsive and a TCP-only post-run 9021 health check succeeded (zero bytes
+  sent; no payload launched). The lock was removed only after its ownership token matched;
+  local verification confirmed it absent. No title controller, Lapy, elevation probe, credential,
+  kernel-state, protection, runtime or protocol modification was performed.
+- Deployed elfldr provenance/revision remains UNKNOWN. Read-only FTP inspection of /data,
+  /data/payloads, /data/etaHEN and /data/elfldr found no stored loader revision proof; no
+  introspection payload was sent and no loader version was inferred from TCP reachability.
 
-No artifact was frozen, deployed or run during this step. No native elevation probe, Lapy
-payload, title launch/close, runtime.cpp integration or compiler/JIT redesign is authorized now.
+This result does not qualify full SDK CRT initialization, inherited stdio, or Lapy on 13.42.
+SDK v0.40's missing 13.42 case remains a concrete source/artifact incompatibility, but the
+original Lapy EOF cannot yet be attributed solely to that gate: this minimal diagnostic also
+failed without a confirmed entry/reply. The failure stage remains unresolved.
+
+## Next action (STOPPED; awaiting owner direction)
+
+The one-run authorization is consumed. Do not retry or run another hardware experiment
+automatically. Do not run the updated Lapy helper or elevation probe until the owner explicitly
+authorizes that next step. No runtime.cpp integration or compiler/JIT redesign is authorized.
 
 ## Not done yet
 
@@ -249,3 +274,4 @@ payload, title launch/close, runtime.cpp integration or compiler/JIT redesign is
 - 2026-10-12 | elevation transport | hardware result reported by owner: status=9 / helper / transport_error; elfldr reachable on 9021, downloadDataSize=256, title healthy and closed cleanly; diagnostic-only transport logging added and locally checked | next: one explicitly authorized bounded hardware rerun to inspect elevation_transport.log
 - 2026-10-13 | elevation diagnostic | 071eba480 | PS5 | transport-failure: first reply EOF | ../ps5-homebrew-dev-protocol/results/PPSA99005-20261013T025138Z | stopped; SDK v0.40 lacks FW 13.42
 - 2026-10-13 | FW13.42 compatibility | host | pass: SDK v0.42 helper + harmless stdio ELF built; host checks pass | build/ps5/fw1342-007 | next: one owner-authorized stdio run
+- 2026-10-13 | stdio | 8f476753d | PS5 | transport-failure: first recv=0; main unconfirmed | ../ps5-homebrew-dev-protocol/results/ELFLDR-STDIO-20261013T034103Z | STOP; no retry/Lapy
